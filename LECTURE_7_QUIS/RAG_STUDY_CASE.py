@@ -46,7 +46,7 @@ def process_single_document(file_path):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=80)
     chunks = text_splitter.split_documents(document)
     
-    time.sleep(3) # Simulasi komputasi berat agar paralelisasi terlihat di log
+    time.sleep(1) # Simulasi komputasi berat agar paralelisasi terlihat di log
     print(f"[Worker PID: {process_id}] Selesai memproses {file_path} -> {len(chunks)} chunks.")
     
     return chunks
@@ -60,7 +60,35 @@ def parallel_retrieve_docs():
     start_time = time.time()
     
     # Menjalankan Data Parallelism dengan 4 CPU cores
-    with Pool(processes=8) as pool:
+    with Pool(processes=4) as pool:
+        # pool.map mendistribusikan Task yang SAMA ke Data yang BERBEDA
+        parallel_results = pool.map(process_single_document, file_paths)
+    
+    # Menggabungkan hasil dari semua worker menjadi satu list (flatten list)
+    all_chunks = [chunk for sublist in parallel_results for chunk in sublist]
+    end_time = time.time()
+    
+    print(f"\nTotal waktu eksekusi Parralel: {end_time - start_time:.4f} detik")
+    print(f"Total chunks dari semua dokumen: {len(all_chunks)}")
+    print("Membangun FAISS Vectorstore...\n")
+    
+    # Embeddings (Memasukkan semua chunk ke dalam FAISS)
+    embedding = OpenAIEmbeddings()
+    vectorstore = FAISS.from_documents(documents=all_chunks, embedding=embedding)
+    
+    # Bersihkan file sementara
+    for file in file_paths:
+        if os.path.exists(file):
+            os.remove(file)
+            
+    return vectorstore.as_retriever()
+
+def sequential_retrieve_docs():
+    file_paths = create_rag_documents()
+    print("=== MEMULAI PARALLEL DOCUMENT INGESTION ===")
+    start_time = time.time()
+    
+    with Pool(processes=1) as pool:
         # pool.map mendistribusikan Task yang SAMA ke Data yang BERBEDA
         parallel_results = pool.map(process_single_document, file_paths)
     
@@ -82,36 +110,7 @@ def parallel_retrieve_docs():
             os.remove(file)
             
     return vectorstore.as_retriever()
-
-def sequential_retrieve_docs():
-    file_paths = create_rag_documents()
-    print("=== MEMULAI PARALLEL DOCUMENT INGESTION ===")
-    start_time = time.time()
-    
-    # Menjalankan Data Parallelism dengan 4 CPU cores
-    with Pool(processes=1) as pool:
-        # pool.map mendistribusikan Task yang SAMA ke Data yang BERBEDA
-        parallel_results = pool.map(process_single_document, file_paths)
-    
-    # Menggabungkan hasil dari semua worker menjadi satu list (flatten list)
-    all_chunks = [chunk for sublist in parallel_results for chunk in sublist]
-    end_time = time.time()
-    
-    print(f"\nTotal waktu eksekusi paralel: {end_time - start_time:.4f} detik")
-    print(f"Total chunks dari semua dokumen: {len(all_chunks)}")
-    print("Membangun FAISS Vectorstore...\n")
-    
-    # Embeddings (Memasukkan semua chunk ke dalam FAISS)
-    embedding = OpenAIEmbeddings()
-    vectorstore = FAISS.from_documents(documents=all_chunks, embedding=embedding)
-    
-    # Bersihkan file sementara
-    for file in file_paths:
-        if os.path.exists(file):
-            os.remove(file)
-            
-    return vectorstore.as_retriever()
 # Eksekusi untuk dites di Notebook
 if __name__ == '__main__':
     # Kamu bisa mengganti 'retriever = retrieve_docs()' di cell 30 dengan ini:
-    retriever = parallel_retrieve_docs()
+    retriever = sequential_retrieve_docs()
